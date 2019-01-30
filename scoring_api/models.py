@@ -98,7 +98,6 @@ class DateField(Field):
     def __init__(self, required=False, nullable=False):
         super(DateField, self).__init__(required, nullable)
         self.pattern = "%d.%m.%Y"
-        self.converted_date = None
 
     def __set__(self, instance, value):
         super(DateField, self).__set__(instance, value)
@@ -108,10 +107,10 @@ class DateField(Field):
             return True
         else:
             try:
-                self.converted_date = datetime.datetime.strptime(value, self.pattern)
+                converted_date = datetime.datetime.strptime(value, self.pattern)
             except ValueError:
                 return False
-            return True
+            return converted_date
 
 
 class BirthDayField(DateField):
@@ -122,8 +121,9 @@ class BirthDayField(DateField):
     def check_value(self, value):
         if self.check_nullable(value):
             return True
-        elif super(BirthDayField, self).check_value(value) and value:
-            delta = datetime.datetime.today() - self.converted_date
+        converted_date = super(BirthDayField, self).check_value(value)
+        if converted_date and value:
+            delta = datetime.datetime.today() - converted_date
             if delta.days < self.max_age * 365:
                 return True
 

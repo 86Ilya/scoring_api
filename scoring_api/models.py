@@ -97,19 +97,18 @@ class PhoneField(Field):
 class DateField(Field):
     def __init__(self, required=False, nullable=False):
         super(DateField, self).__init__(required, nullable)
-        self.pattern = r'^\d{2}\.\d{2}\.\d{4}$'
+        self.pattern = "%d.%m.%Y"
         self.converted_date = None
 
     def __set__(self, instance, value):
-        # Будем хранить дату в виде строки
         super(DateField, self).__set__(instance, value)
 
     def check_value(self, value):
         if self.check_nullable(value):
             return True
-        elif super(DateField, self).check_value(value):
+        else:
             try:
-                self.converted_date = datetime.datetime.strptime(value, "%d.%m.%Y")
+                self.converted_date = datetime.datetime.strptime(value, self.pattern)
             except ValueError:
                 return False
             return True

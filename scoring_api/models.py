@@ -105,12 +105,13 @@ class DateField(Field):
     def check_value(self, value):
         if self.check_nullable(value):
             return True
-        else:
+        elif isinstance(value, self.basetype):
             try:
                 converted_date = datetime.datetime.strptime(value, self.pattern)
             except ValueError:
                 return False
             return converted_date
+        return False
 
 
 class BirthDayField(DateField):

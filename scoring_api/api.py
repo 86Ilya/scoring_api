@@ -11,15 +11,8 @@ from optparse import OptionParser
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from scoring import get_score, get_interests
 from models import Model, CharField, ArgumentsField, EmailField, PhoneField, DateField, BirthDayField, GenderField, \
-    ClientIDsField
-
-
-class InvalidRequest(ValueError):
-    pass
-
-
-class Forbidden(ValueError):
-    pass
+    ClientIDsField, ValidationError, InvalidRequest, Forbidden
+from itertools import combinations
 
 
 SALT = "Otus"
@@ -61,6 +54,12 @@ class OnlineScoreRequest(Model):
     birthday = BirthDayField(required=False, nullable=True)
     gender = GenderField(required=False, nullable=True)
 
+    def validate_arguments(self):
+        minimum_args = (set(('phone', 'email')), set(('first_name', 'last_name')), set(('gender', 'birthday')))
+        for filled_pairs in combinations(self.get_filled_fields(), 2):
+            if set(filled_pairs) in minimum_args:
+                return True
+
 
 class MethodRequest(Model):
     account = CharField(required=False, nullable=True)
@@ -85,22 +84,6 @@ def check_auth(request):
     return False
 
 
-def check_online_score_arguments(arguments):
-    """
-    Функция проверяет минимально необходимые аргументы для скоринга
-    :param dict arguments:
-    :return:
-    """
-    minimum_args = (('phone', 'email'), ('first_name', 'last_name'), ('gender', 'birthday'))
-    filled_fields = [k for k, v in arguments.items() if v is not None]
-
-    for pair in minimum_args:
-        if pair[0] in filled_fields and pair[1] in filled_fields:
-            return True
-
-    return False
-
-
 def get_parsed_request(request):
     """
     Функция разбирает полученный запрос на структуру MethodRequest и возвращает его,
@@ -109,15 +92,14 @@ def get_parsed_request(request):
     :return MethodRequest:
     """
     body = request.get('body')
-    mr = MethodRequest()
     if not body:
         raise InvalidRequest(u"Request has empty 'body'")
 
-    mr.account = body["account"]
-    mr.login = body["login"]
-    mr.token = body["token"]
-    mr.arguments = body["arguments"]
-    mr.method = body["method"]
+    mr = MethodRequest(body)
+    request_errors = mr.is_valid()
+
+    if request_errors:
+        raise ValidationError(request_errors)
 
     if not check_auth(mr):
         raise Forbidden(u"Wrong credentials.")
@@ -134,12 +116,14 @@ def clients_interests_handler(request, ctx, store):
     :return dict:
     """
     mr = get_parsed_request(request)
-    ci = ClientsInterestsRequest()
-    ci.client_ids = mr.arguments.get("client_ids", None)
-    ci.date = mr.arguments.get("date", None)
+    ci = ClientsInterestsRequest(mr.arguments)
+    ci_errors = ci.is_valid()
+
+    if ci_errors:
+        raise ValidationError(ci_errors)
+
     interests = {client_id: get_interests(None, client_id) for client_id in ci.client_ids}
     ctx.update({'nclients': len(ci.client_ids)})
-
     return interests
 
 
@@ -152,16 +136,14 @@ def online_score_handler(request, ctx, store):
     :return dict:
     """
     mr = get_parsed_request(request)
-    score_req = OnlineScoreRequest()
-    score_req.first_name = mr.arguments.get("first_name", None)
-    score_req.last_name = mr.arguments.get("last_name", None)
-    score_req.email = mr.arguments.get("email", None)
-    score_req.phone = mr.arguments.get("phone", None)
-    score_req.birthday = mr.arguments.get("birthday", None)
-    score_req.gender = mr.arguments.get("gender", None)
+    score_req = OnlineScoreRequest(mr.arguments)
+    score_req_errors = score_req.is_valid()
 
-    if not check_online_score_arguments(mr.arguments):
-        raise InvalidRequest("Bad arguments in request: {}".format(mr.arguments))
+    if score_req_errors:
+        raise ValidationError(score_req_errors)
+
+    if not score_req.validate_arguments():
+        raise InvalidRequest(u"Not enough arguments in request: {}".format(mr.arguments))
 
     if mr.is_admin:
         score = 42
@@ -188,28 +170,24 @@ def method_handler(request, ctx, store):
     METHODS = {
         "online_score": online_score_handler,
         "clients_interests": clients_interests_handler,
-
     }
+
     try:
-        logging.info(u'Обрабатываем запрос: {}'.format(request))
+        logging.info(u'Processing request: {}'.format(request))
         mr = get_parsed_request(request)
         if mr.method in METHODS:
             response = METHODS[mr.method](request, ctx, store)
             code = OK
-            logging.info(u'Запрос: {} успешно обработан. Результат: {}'.format(request, response))
+            logging.info(u'Request: {} successfully processed. Result is: {}'.format(request, response))
         else:
-            raise InvalidRequest("Unknown methdod '{}'".format(mr.method))
+            raise InvalidRequest(u"Unknown method '{}'".format(mr.method))
 
     except InvalidRequest, error:
         logging.error(u'{}'.format(error))
         response, code = error.message, INVALID_REQUEST
     except Forbidden, error:
         response, code = error.message, FORBIDDEN
-    except KeyError, error:
-        logging.error(u'There is no element "{}" in request'.format(error.message))
-        response, code = error.message, INVALID_REQUEST
-    except ValueError, error:
-        logging.error(u'{}'.format(error.message))
+    except ValidationError, error:
         response, code = error.message, INVALID_REQUEST
 
     return response, code
@@ -233,7 +211,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             data_string = self.rfile.read(int(self.headers['Content-Length']))
             request = json.loads(data_string)
         except Exception, e:
-            logging.error("Bad request: %s" % e.message)
+            logging.error(u"Bad request: %s" % e.message)
             code = BAD_REQUEST
 
         if request:
@@ -243,7 +221,7 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
                 try:
                     response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
                 except Exception, e:
-                    logging.exception("Unexpected error: %s" % e.message)
+                    logging.exception(u"Unexpected error: %s" % e.message)
                     code = INTERNAL_ERROR
             else:
                 code = NOT_FOUND

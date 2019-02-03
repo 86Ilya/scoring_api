@@ -5,6 +5,18 @@ import datetime
 import abc
 
 
+class ValidationError(ValueError):
+    pass
+
+
+class InvalidRequest(ValueError):
+    pass
+
+
+class Forbidden(ValueError):
+    pass
+
+
 class Field(object):
     """Базовый класс определяющий поле. От него наследуются все другие поля."""
     __metaclass__ = abc.ABCMeta
@@ -12,23 +24,31 @@ class Field(object):
     def __init__(self, required=False, nullable=False):
         self.required = required
         self.nullable = nullable
-        self.values_keeper = dict()
         self.pattern = None
         self.basetype = basestring
         self.name = None
 
     def __set__(self, instance, value):
         if instance:
-            if self.check_value(value):
-                self.values_keeper[instance] = value
+            if value is None and self.required is True:
+                raise ValidationError(
+                    u'Field {} are required, but value is None'.format(self.name))
+            elif value is None and self.nullable:
+                raise ValidationError(
+                    u'Field {} are not nullable, but value is None'.format(self.name))
+            elif not isinstance(value, self.basetype):
+                raise ValidationError(
+                    u'Field {} must have {} type but value {} has type {}'.format(self.name, self.basetype, value,
+                                                                                  type(value).__name__))
+            elif self.check_value(value) or self.check_nullable(value):
+                self.__dict__[instance] = value
             else:
-                raise ValueError(
-                    u'Field {} are not compatible with value "{}" type "{}"'.format(self.name, value,
-                                                                                    type(value).__name__))
+                raise ValidationError(
+                    u'Field {} are not compatible with value "{}"'.format(self.name, value))
 
     def __get__(self, instance, owner):
         if instance:
-            return self.values_keeper.get(instance, None)
+            return self.__dict__.get(instance, None)
         else:
             return self
 
@@ -54,10 +74,7 @@ class CharField(Field):
         self.pattern = r'(.){0,256}'
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        else:
-            return super(CharField, self).check_value(value)
+        return super(CharField, self).check_value(value)
 
 
 class ArgumentsField(Field):
@@ -72,13 +89,10 @@ class ArgumentsField(Field):
 class EmailField(CharField):
     def __init__(self, required=False, nullable=False):
         super(EmailField, self).__init__(required, nullable)
-        self.pattern = r'^[a-zA-Z0-9_.-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        self.pattern = r'^[a-zA-Z0-9_.-]+@[a-zA-Z0-9-]+\.\w+$'
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        else:
-            return super(EmailField, self).check_value(value)
+        return super(EmailField, self).check_value(value)
 
 
 class PhoneField(Field):
@@ -88,10 +102,7 @@ class PhoneField(Field):
         self.basetype = (basestring, int)
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        else:
-            return super(PhoneField, self).check_value(value)
+        return super(PhoneField, self).check_value(value)
 
 
 class DateField(Field):
@@ -103,9 +114,7 @@ class DateField(Field):
         super(DateField, self).__set__(instance, value)
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        elif isinstance(value, self.basetype):
+        if isinstance(value, self.basetype):
             try:
                 converted_date = datetime.datetime.strptime(value, self.pattern)
             except ValueError:
@@ -120,8 +129,6 @@ class BirthDayField(DateField):
         self.max_age = 70
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
         converted_date = super(BirthDayField, self).check_value(value)
         if converted_date and value:
             delta = datetime.datetime.today() - converted_date
@@ -136,10 +143,7 @@ class GenderField(Field):
         self.basetype = int
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        else:
-            return super(GenderField, self).check_value(value)
+        return super(GenderField, self).check_value(value)
 
 
 class ClientIDsField(Field):
@@ -148,9 +152,7 @@ class ClientIDsField(Field):
         self.basetype = list
 
     def check_value(self, value):
-        if self.check_nullable(value):
-            return True
-        elif isinstance(value, self.basetype) and len(value) > 0:
+        if isinstance(value, self.basetype) and len(value) > 0:
             for i in value:
                 if not isinstance(i, int):
                     return False
@@ -159,15 +161,68 @@ class ClientIDsField(Field):
 
 class ModelMeta(type):
     """Метакласс позволит нам добавить имена полей Field внутрь объектов"""
+
     def __new__(mcls, name, bases, attrs):
+        declared_fields = list()
         for attrname, attrvalue in attrs.iteritems():
             if isinstance(attrvalue, Field):
                 attrvalue.name = attrname
+                declared_fields.append(attrname)
+        attrs["declared_fields"] = declared_fields
         return super(ModelMeta, mcls).__new__(mcls, name, bases, attrs)
 
 
 class Model(object):
+    """
+    Базовый класс для моделей. Для создания принимает на вход объект-словарь.
+    """
     __metaclass__ = ModelMeta
+
+    def __new__(cls, arguments=None):
+        obj = super(Model, cls).__new__(cls)
+
+        # Если задан аргумент при создании объекта, то будем использовать свою магию для проверки полей.
+        if arguments and isinstance(arguments, dict) and len(arguments) > 0:
+            obj.errors = {}
+
+            if not isinstance(arguments, dict):
+                raise ValidationError(u"You must pass a dict for create object!")
+
+            # Зададим значения полей в нашем объекте, которые указаны в arguments и совпадают с полями класса.
+            for key, value in arguments.iteritems():
+                if key in cls.declared_fields:
+                    try:
+                        setattr(obj, key, value)
+                    except ValidationError, error:
+                        obj.errors[key] = error.message
+                else:
+                    obj.errors[key] = u"Field with name {} are not declared in this object".format(key)
+
+            for unused_field in set(cls.declared_fields) - set(arguments.keys()):
+                # Если остальные поля не указаны, но нужны, то запишем ошибку аналогичную ошибкам ValidationError
+                if getattr(cls, unused_field).required:
+                    obj.errors[unused_field] = u'Field {} are required, but value is None'.format(unused_field)
+        else:
+            raise ValidationError(
+                u"Arguments for {} must have a dict type and length more than 0. We have '{}'".format(cls.__name__,
+                                                                                                      arguments))
+        return obj
+
+    def is_valid(self):
+        if hasattr(self, "errors") and len(self.errors) > 0:
+            return self.errors
+        elif not hasattr(self, "errors"):
+            # Тут можно проверить только required поля
+            for field in self.declared_fields:
+                value = getattr(self, field)
+                if value is None and getattr(self.__class__, field).required is True:
+                    if not hasattr(self, "errors"):
+                        self.errors = dict()
+                    self.errors[field] = u'Field {} are required, but value is None'.format(field)
+
+            return self.errors
+        else:
+            return False
 
     def get_filled_fields(self):
         filled_fields = []

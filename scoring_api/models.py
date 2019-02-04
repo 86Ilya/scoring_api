@@ -183,7 +183,7 @@ class Model(object):
         cls = self.__class__
 
         # Если задан аргумент при создании объекта, то будем использовать свою магию для проверки полей.
-        if isinstance(arguments, dict):
+        if arguments and isinstance(arguments, dict):
             self.errors = {}
 
             # Зададим значения полей в нашем объекте, которые указаны в arguments и совпадают с полями класса.
@@ -200,6 +200,9 @@ class Model(object):
                 # Если остальные поля не указаны, но нужны, то запишем ошибку аналогичную ошибкам ValidationError
                 if getattr(cls, unused_field).required:
                     self.errors[unused_field] = u'Field {} are required, but value is None'.format(unused_field)
+        # Если не задан, то ничего не будем предпринимать
+        elif arguments is None:
+            pass
         else:
             raise ValidationError(
                 u"Arguments for {} must have a dict type. We have '{}'".format(cls.__name__, type(arguments)))

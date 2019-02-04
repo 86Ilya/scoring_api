@@ -197,7 +197,7 @@ class Model(object):
                     try:
                         setattr(self, key, value)
                     except ValidationError, error:
-                        self.errors[key] = error.message
+                        self.errors[key] = error.args
                 else:
                     self.errors[key] = u"Field with name {} are not declared in this object".format(key)
 

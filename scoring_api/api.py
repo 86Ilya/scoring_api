@@ -180,11 +180,11 @@ def method_handler(request, ctx, store):
 
     except InvalidRequest, error:
         logging.error(u'{}'.format(error))
-        response, code = error.message, INVALID_REQUEST
+        response, code = error.args, INVALID_REQUEST
     except Forbidden, error:
-        response, code = error.message, FORBIDDEN
+        response, code = error.args, FORBIDDEN
     except ValidationError, error:
-        response, code = error.message, INVALID_REQUEST
+        response, code = error.args, INVALID_REQUEST
 
     return response, code
 

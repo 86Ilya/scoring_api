@@ -33,22 +33,22 @@ class Field(object):
             if value is None and self.required is True:
                 raise ValidationError(
                     u'Field {} are required, but value is None'.format(self.name))
-            elif value is None and self.nullable:
+            elif value is None and not self.nullable:
                 raise ValidationError(
                     u'Field {} are not nullable, but value is None'.format(self.name))
             elif not isinstance(value, self.basetype):
                 raise ValidationError(
                     u'Field {} must have {} type but value {} has type {}'.format(self.name, self.basetype, value,
                                                                                   type(value).__name__))
-            elif self.check_value(value) or self.check_nullable(value):
-                self.__dict__[instance] = value
+            elif self.check_nullable(value) or self.check_value(value):
+                instance.__dict__[self.name] = value
             else:
                 raise ValidationError(
                     u'Field {} are not compatible with value "{}"'.format(self.name, value))
 
     def __get__(self, instance, owner):
         if instance:
-            return self.__dict__.get(instance, None)
+            return instance.__dict__.get(self.name, None)
         else:
             return self
 
@@ -62,7 +62,8 @@ class Field(object):
             return re.match(self.pattern, value)
 
     def check_nullable(self, value):
-        if value is None and self.nullable:
+        if self.nullable and not isinstance(value, int) and (
+                value is None or (isinstance(value, self.basetype) and len(value) == 0)):
             return True
         else:
             return False
@@ -178,51 +179,51 @@ class Model(object):
     """
     __metaclass__ = ModelMeta
 
-    def __new__(cls, arguments=None):
-        obj = super(Model, cls).__new__(cls)
+    def __init__(self, arguments=None):
+        cls = self.__class__
 
         # Если задан аргумент при создании объекта, то будем использовать свою магию для проверки полей.
-        if arguments and isinstance(arguments, dict) and len(arguments) > 0:
-            obj.errors = {}
-
-            if not isinstance(arguments, dict):
-                raise ValidationError(u"You must pass a dict for create object!")
+        if isinstance(arguments, dict):
+            self.errors = {}
 
             # Зададим значения полей в нашем объекте, которые указаны в arguments и совпадают с полями класса.
             for key, value in arguments.iteritems():
                 if key in cls.declared_fields:
                     try:
-                        setattr(obj, key, value)
+                        setattr(self, key, value)
                     except ValidationError, error:
-                        obj.errors[key] = error.message
+                        self.errors[key] = error.message
                 else:
-                    obj.errors[key] = u"Field with name {} are not declared in this object".format(key)
+                    self.errors[key] = u"Field with name {} are not declared in this object".format(key)
 
             for unused_field in set(cls.declared_fields) - set(arguments.keys()):
                 # Если остальные поля не указаны, но нужны, то запишем ошибку аналогичную ошибкам ValidationError
                 if getattr(cls, unused_field).required:
-                    obj.errors[unused_field] = u'Field {} are required, but value is None'.format(unused_field)
+                    self.errors[unused_field] = u'Field {} are required, but value is None'.format(unused_field)
         else:
             raise ValidationError(
-                u"Arguments for {} must have a dict type and length more than 0. We have '{}'".format(cls.__name__,
-                                                                                                      arguments))
-        return obj
+                u"Arguments for {} must have a dict type. We have '{}'".format(cls.__name__, type(arguments)))
 
     def is_valid(self):
         if hasattr(self, "errors") and len(self.errors) > 0:
-            return self.errors
+            return False
         elif not hasattr(self, "errors"):
-            # Тут можно проверить только required поля
+            # Тут можно проверить только required поля и "ненулевые" поля
+            errors = dict()
             for field in self.declared_fields:
                 value = getattr(self, field)
                 if value is None and getattr(self.__class__, field).required is True:
-                    if not hasattr(self, "errors"):
-                        self.errors = dict()
-                    self.errors[field] = u'Field {} are required, but value is None'.format(field)
+                    errors[field] = u'Field {} are required, but value is None'.format(field)
+                elif not getattr(self, field).check_nullable(value):
+                    errors[field] = u'Field {} are not nullable, but value is None'.format(field)
 
-            return self.errors
+            if len(errors) > 0:
+                self.errors = errors
+                return False
+            else:
+                return True
         else:
-            return False
+            return True
 
     def get_filled_fields(self):
         filled_fields = []

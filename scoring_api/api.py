@@ -12,7 +12,6 @@ from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from scoring import get_score, get_interests
 from models import Model, CharField, ArgumentsField, EmailField, PhoneField, DateField, BirthDayField, GenderField, \
     ClientIDsField, ValidationError, InvalidRequest, Forbidden
-from itertools import combinations
 
 
 SALT = "Otus"
@@ -55,10 +54,11 @@ class OnlineScoreRequest(Model):
     gender = GenderField(required=False, nullable=True)
 
     def validate_arguments(self):
-        minimum_args = (set(('phone', 'email')), set(('first_name', 'last_name')), set(('gender', 'birthday')))
-        for filled_pairs in combinations(self.get_filled_fields(), 2):
-            if set(filled_pairs) in minimum_args:
-                return True
+        if (self.phone and self.email) or (self.first_name and self.last_name)\
+                or (self.gender is not None and self.birthday):
+            return True
+        else:
+            return False
 
 
 class MethodRequest(Model):
@@ -96,10 +96,9 @@ def get_parsed_request(request):
         raise InvalidRequest(u"Request has empty 'body'")
 
     mr = MethodRequest(body)
-    request_errors = mr.is_valid()
 
-    if request_errors:
-        raise ValidationError(request_errors)
+    if not mr.is_valid():
+        raise ValidationError(mr.errors)
 
     if not check_auth(mr):
         raise Forbidden(u"Wrong credentials.")
@@ -117,10 +116,9 @@ def clients_interests_handler(request, ctx, store):
     """
     mr = get_parsed_request(request)
     ci = ClientsInterestsRequest(mr.arguments)
-    ci_errors = ci.is_valid()
 
-    if ci_errors:
-        raise ValidationError(ci_errors)
+    if not ci.is_valid():
+        raise ValidationError(ci.errors)
 
     interests = {client_id: get_interests(None, client_id) for client_id in ci.client_ids}
     ctx.update({'nclients': len(ci.client_ids)})
@@ -137,11 +135,9 @@ def online_score_handler(request, ctx, store):
     """
     mr = get_parsed_request(request)
     score_req = OnlineScoreRequest(mr.arguments)
-    score_req_errors = score_req.is_valid()
 
-    if score_req_errors:
-        raise ValidationError(score_req_errors)
-
+    if not score_req.is_valid():
+        raise ValidationError(score_req.errors)
     if not score_req.validate_arguments():
         raise InvalidRequest(u"Not enough arguments in request: {}".format(mr.arguments))
 

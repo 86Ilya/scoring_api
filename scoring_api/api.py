@@ -120,7 +120,7 @@ def clients_interests_handler(request, ctx, store):
     if not ci.is_valid():
         raise ValidationError(ci.errors)
 
-    interests = {client_id: get_interests(None, client_id) for client_id in ci.client_ids}
+    interests = {client_id: get_interests(store, client_id) for client_id in ci.client_ids}
     ctx.update({'nclients': len(ci.client_ids)})
     return interests
 
@@ -144,7 +144,7 @@ def online_score_handler(request, ctx, store):
     if mr.is_admin:
         score = 42
     else:
-        score = get_score(None, score_req.phone, score_req.email, score_req.birthday, score_req.gender,
+        score = get_score(store, score_req.phone, score_req.email, score_req.birthday, score_req.gender,
                           score_req.first_name, score_req.last_name)
 
     ctx.update({'has': score_req.get_filled_fields()})

@@ -21,30 +21,35 @@ class Field(object):
     """Базовый класс определяющий поле. От него наследуются все другие поля."""
     __metaclass__ = abc.ABCMeta
 
+    pattern = None
+    basetype = basestring
+    blank_value = ['', (), [], {}, None]
+
     def __init__(self, required=False, nullable=False):
         self.required = required
         self.nullable = nullable
-        self.pattern = None
-        self.basetype = basestring
+
         self.name = None
 
     def __set__(self, instance, value):
         if instance:
             if value is None and self.required is True:
-                raise ValidationError(
-                    u'Field {} are required, but value is None'.format(self.name))
-            elif value is None and not self.nullable:
-                raise ValidationError(
-                    u'Field {} are not nullable, but value is None'.format(self.name))
-            elif not isinstance(value, self.basetype):
-                raise ValidationError(
-                    u'Field {} must have {} type but value {} has type {}'.format(self.name, self.basetype, value,
-                                                                                  type(value).__name__))
-            elif self.check_nullable(value) or self.check_value(value):
-                instance.__dict__[self.name] = value
-            else:
-                raise ValidationError(
-                    u'Field {} are not compatible with value "{}"'.format(self.name, value))
+                raise ValidationError(u'Field {} are required, but value is None'.format(self.name))
+
+            if value in self.blank_value and not self.nullable:
+                raise ValidationError(u'Field {} are not nullable, but value is None'.format(self.name))
+
+            if value is not None:
+                if not isinstance(value, self.basetype):
+                    raise ValidationError(
+                        u'Field {} must have {} type but value {} has type {}'.format(self.name, self.basetype, value,
+                                                                                      type(value).__name__))
+                if not self.check_value(value):
+                    raise ValidationError(
+                        u'Field {} are not compatible by pattern {} with value "{}"'.format(self.name,
+                                                                                            self.pattern, value))
+            # Если мы дошли до сюда, то успешно прошли все проверки.
+            instance.__dict__[self.name] = value
 
     def __get__(self, instance, owner):
         if instance:
@@ -188,7 +193,7 @@ class Model(object):
 
             # Зададим значения полей в нашем объекте, которые указаны в arguments и совпадают с полями класса.
             for key, value in arguments.iteritems():
-                if key in cls.declared_fields:
+                if key in self.declared_fields:
                     try:
                         setattr(self, key, value)
                     except ValidationError, error:
@@ -208,33 +213,14 @@ class Model(object):
                 u"Arguments for {} must have a dict type. We have '{}'".format(cls.__name__, type(arguments)))
 
     def is_valid(self):
-        if hasattr(self, "errors") and len(self.errors) > 0:
-            return False
-        elif not hasattr(self, "errors"):
-            # Тут можно проверить только required поля и "ненулевые" поля
-            errors = dict()
-            for field in self.declared_fields:
-                value = getattr(self, field)
-                if value is None and getattr(self.__class__, field).required is True:
-                    errors[field] = u'Field {} are required, but value is None'.format(field)
-                elif not getattr(self, field).check_nullable(value):
-                    errors[field] = u'Field {} are not nullable, but value is None'.format(field)
-
-            if len(errors) > 0:
-                self.errors = errors
-                return False
-            else:
-                return True
-        else:
-            return True
+        if hasattr(self, "errors"):
+            return len(self.errors) == 0
 
     def get_filled_fields(self):
         filled_fields = []
-        for key, value in self.__class__.__dict__.iteritems():
-            # Выясним какие поля есть в родительском классе являются типом Fields
-            if isinstance(value, Field):
-                # Далее проверим в экземпляре класса чему равен этот элемент, если не пуст, то добавим в filled_fields
-                if getattr(self, key) is not None:
-                    filled_fields.append(key)
+        for key in self.declared_fields:
+            # Далее проверим в экземпляре класса чему равен этот элемент, если не пуст, то добавим в filled_fields
+            if getattr(self, key) is not None:
+                filled_fields.append(key)
 
         return filled_fields

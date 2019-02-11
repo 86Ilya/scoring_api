@@ -12,6 +12,7 @@ from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from scoring import get_score, get_interests
 from models import Model, CharField, ArgumentsField, EmailField, PhoneField, DateField, BirthDayField, GenderField, \
     ClientIDsField, ValidationError, InvalidRequest, Forbidden
+from store import Store, GetValueError, SetValueError
 
 
 SALT = "Otus"
@@ -37,6 +38,15 @@ GENDERS = {
     UNKNOWN: "unknown",
     MALE: "male",
     FEMALE: "female",
+}
+
+DEFAULT = {
+    'HOST': '127.0.0.1',
+    'HTTP_PORT': 8080,
+    'REDIS_PORT': 6379,
+    'REDIS_DB': 0,
+    'TIMEOUT': 1,
+    'N_ATTEMPTS': 5
 }
 
 
@@ -193,7 +203,12 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
     router = {
         "method": method_handler,
     }
+
     store = None
+
+    @classmethod
+    def set_store(cls, host, port, db, timeout, n_attempts):
+        cls.store = Store(host=host, port=port, db=db, timeout=timeout, n_attempts=n_attempts)
 
     @staticmethod
     def get_request_id(headers):
@@ -216,8 +231,12 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
             if path in self.router:
                 try:
                     response, code = self.router[path]({"body": request, "headers": self.headers}, context, self.store)
-                except Exception, e:
-                    logging.exception(u"Unexpected error: %s" % e.message)
+                except SetValueError, error:
+                    logging.error(u"Error while setting value to db: %s" % error.args[0])
+                except GetValueError, error:
+                    logging.error(u"Error while getting value from db: %s" % error.args[0])
+                except Exception, error:
+                    logging.exception(u"Unexpected error: %s" % error.args[0])
                     code = INTERNAL_ERROR
             else:
                 code = NOT_FOUND
@@ -237,12 +256,17 @@ class MainHTTPHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     op = OptionParser()
-    op.add_option("-p", "--port", action="store", type=int, default=8080)
+    op.add_option("-p", "--port", action="store", type=int, default=DEFAULT['HTTP_PORT'])
     op.add_option("-l", "--log", action="store", default=None)
+    op.add_option("--redis-port", dest='redis_host', action="store", default=DEFAULT['REDIS_PORT'])
+    op.add_option("--redis-host", dest='redis_port', action="store", default=DEFAULT['HOST'])
+    op.add_option("--redis-db", dest='redis_db', action="store", default=DEFAULT['REDIS_DB'])
     (opts, args) = op.parse_args()
     logging.basicConfig(filename=opts.log, level=logging.INFO,
                         format='[%(asctime)s] %(levelname).1s %(message)s', datefmt='%Y.%m.%d %H:%M:%S')
-    server = HTTPServer(("localhost", opts.port), MainHTTPHandler)
+    server = HTTPServer((DEFAULT['HOST'], opts.port), MainHTTPHandler)
+    MainHTTPHandler.set_store(opts.redis_host, opts.redis_port, opts.redis_db, DEFAULT['TIMEOUT'],
+                              DEFAULT['N_ATTEMPTS'])
     logging.info("Starting server at %s" % opts.port)
     try:
         server.serve_forever()

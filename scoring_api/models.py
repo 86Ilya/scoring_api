@@ -77,7 +77,7 @@ class Field(object):
 class CharField(Field):
     def __init__(self, required=False, nullable=False):
         super(CharField, self).__init__(required, nullable)
-        self.pattern = r'(.){0,256}'
+        self.pattern = r'^(.){0,256}$'
 
     def check_value(self, value):
         return super(CharField, self).check_value(value)
@@ -188,7 +188,7 @@ class Model(object):
         cls = self.__class__
 
         # Если задан аргумент при создании объекта, то будем использовать свою магию для проверки полей.
-        if arguments and isinstance(arguments, dict):
+        if arguments is not None and isinstance(arguments, dict):
             self.errors = {}
 
             # Зададим значения полей в нашем объекте, которые указаны в arguments и совпадают с полями класса.
@@ -197,7 +197,7 @@ class Model(object):
                     try:
                         setattr(self, key, value)
                     except ValidationError, error:
-                        self.errors[key] = error.args
+                        self.errors[key] = error.args[0]
                 else:
                     self.errors[key] = u"Field with name {} are not declared in this object".format(key)
 

@@ -1,21 +1,27 @@
 import hashlib
 import datetime
-import unittest
 
 from scoring_api import api
 from scoring_api.store import Store
 import json
+import pytest
 
 
-class TestSuite:
+class TestSuite(object):
+    settings = None
+
+    @pytest.fixture(autouse=True, scope='class')
+    def _prepare(self, server_params):
+        cls = self.__class__
+        cls.settings = Store(server_params['HOST'], server_params['REDIS_PORT'], server_params['REDIS_DB'],
+                             server_params['TIMEOUT'], server_params['N_ATTEMPTS'])
+        cls.settings.flushdb()
+        for key in range(0, 4):
+            cls.settings.set(u"i:{}".format(key), json.dumps(['cars', 'cats']))
 
     def setup_class(self):
         self.context = {}
         self.headers = {}
-        self.settings = Store('127.0.0.1', '6379', 0, 15, 3)
-        # self.settings = {}
-        for key in range(0, 4):
-            self.settings.set(u"i:{}".format(key), json.dumps(['cars', 'cats']))
 
     def get_response(self, request):
         return api.method_handler({"body": request, "headers": self.headers}, self.context, self.settings)
@@ -52,7 +58,7 @@ class TestSuite:
         response, code = self.get_response(ok_score_request_values)
         assert api.OK == code, ok_score_request_values
         score = response.get("score")
-        assert isinstance(score, (int, float)) and score >= 0, ok_score_request_values == True
+        assert isinstance(score, (int, float)) and score >= 0
         assert sorted(self.context["has"]) == sorted(ok_score_request_values["arguments"].keys())
 
     def test_ok_score_admin_request(self):
@@ -76,9 +82,5 @@ class TestSuite:
         assert api.OK == code, ok_interests_request_values
         assert len(ok_interests_request_values["arguments"]["client_ids"]) == len(response)
         assert all(v and isinstance(v, list) and all(isinstance(i, basestring) for i in v)
-                    for v in response.values()) == True
+                   for v in response.values()) is True
         assert self.context.get("nclients") == len(ok_interests_request_values["arguments"]["client_ids"])
-
-
-if __name__ == "__main__":
-    unittest.main()

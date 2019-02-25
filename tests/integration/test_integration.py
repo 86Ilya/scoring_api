@@ -129,7 +129,7 @@ def test_raise_error_in_get_interests_when_db_didnt_answer(http_server, interest
                     json.loads(response.content).get("response", None)
                     last_log = caplog.records.pop()
                     assert u"Error while getting value from db:" \
-                           u" We did 4 unsuccessful attempts to Get value from DB" in last_log.message
+                           u" We did 5 unsuccessful attempts to Get value from DB" in last_log.message
                     last_log = caplog.records.pop()
                     assert u"We have connection error in 'get' operation:" \
                            u" Fake timeout error. Trying to reconnect." in last_log.message
@@ -156,7 +156,7 @@ def test_raise_error_in_get_interests_when_db_cant_connect(http_server, interest
                 json.loads(response.content).get("response", None)
                 last_log = caplog.records.pop()
                 assert u"Error while getting value from db:" \
-                       u" We did 4 unsuccessful attempts to Get value from DB" in last_log.message
+                       u" We did 5 unsuccessful attempts to Get value from DB" in last_log.message
                 last_log = caplog.records.pop()
                 # print last_log.message
                 assert u"We have connection error in 'get' operation: Error 111" in last_log.message
@@ -168,14 +168,14 @@ def test_raise_error_in_get_interests_when_db_cant_connect(http_server, interest
 
 
 def test_get_score_with_values_in_cache_when_cache_works_fine(http_server, scores, online_score_request_template,
-                                                              send_post_request):
+                                                              send_post_request, store):
     # Очистим тестовый кэш
-    http_server.store.cache = {}
+    store.flushcache()
+
     # Заполним наше хранилище тестовыми данными
     for key, value in scores.iteritems():
-        http_server.store.cache_set(u"{}".format(key), json.dumps(value["score"]), 60 * 60)
+        store.cache_set(u"{}".format(key), json.dumps(value["score"]), 60 * 60)
 
-    # print http_server.store.cache
     payload = online_score_request_template.copy()
 
     with http_server:
@@ -184,7 +184,7 @@ def test_get_score_with_values_in_cache_when_cache_works_fine(http_server, score
                 payload.update({"arguments": value["arguments"]})
                 response = send_post_request(payload)
                 scores_dict = json.loads(response.content).get("response", None)
-                assert scores_dict[u"score"] == unicode(value["score"])
+                assert scores_dict[u"score"] == value["score"]
 
         except Exception, error:
             pytest.fail(error.message)
@@ -192,11 +192,10 @@ def test_get_score_with_values_in_cache_when_cache_works_fine(http_server, score
     return True
 
 
-def test_raise_error_in_get_score_when_cache_unavailable(http_server, scores, online_score_request_template, caplog,
-                                                         send_post_request):
-    # Удалим тестовый кэш
-    del http_server.store.cache
-
+def test_get_score_calculate_score_when_cache_not_exist(http_server, scores, online_score_request_template, store,
+                                                        send_post_request):
+    # Очистим тестовый кэш
+    store.flushcache()
     payload = online_score_request_template.copy()
 
     with http_server:
@@ -204,26 +203,23 @@ def test_raise_error_in_get_score_when_cache_unavailable(http_server, scores, on
             for key, value in scores.iteritems():
                 payload.update({"arguments": value["arguments"]})
                 response = send_post_request(payload)
-                json.loads(response.content).get("response", None)
-                last_log = caplog.records.pop()
-                assert last_log.message == u"Unexpected error: 'Store' object has no attribute 'cache'"
-                last_log = caplog.records.pop()
-                assert last_log.message == u"We have error while trying to get value from cache:" \
-                                           u" 'Store' object has no attribute 'cache'"
+                scores_dict = json.loads(response.content).get("response", None)
+                assert scores_dict[u"score"] == value["calculated_score"]
 
         except Exception, error:
-            pytest.fail(error.args[0])
+            pytest.fail(error)
 
     return True
 
 
 def test_get_score_recalculate_score_when_value_expired(http_server, scores, online_score_request_template,
-                                                        send_post_request):
+                                                        send_post_request, store):
     # Очистим тестовый кэш
-    http_server.store.cache = {}
+    store.flushcache()
     # Заполним наше хранилище тестовыми данными
     for key, value in scores.iteritems():
-        http_server.store.cache_set(u"{}".format(key), json.dumps(value["score"]), 1)
+        store.cache_set(u"{}".format(key), json.dumps(value["score"]), 1)
+
     time.sleep(2)
     payload = online_score_request_template.copy()
 

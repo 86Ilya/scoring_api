@@ -106,7 +106,7 @@ def get_parsed_request(request):
     return mr
 
 
-def clients_interests_handler(request, ctx, store):
+def clients_interests_handler(mr, ctx, store):
     """
     Обработчик для запросов по интересам клиента clients_interests
     :param dict request:
@@ -114,7 +114,6 @@ def clients_interests_handler(request, ctx, store):
     :param store:
     :return dict:
     """
-    mr = get_parsed_request(request)
     ci = ClientsInterestsRequest(mr.arguments)
 
     if not ci.is_valid():
@@ -125,7 +124,7 @@ def clients_interests_handler(request, ctx, store):
     return interests
 
 
-def online_score_handler(request, ctx, store):
+def online_score_handler(mr, ctx, store):
     """
     Обработчик для запросов по скорингу online_score
     :param dict request:
@@ -133,7 +132,6 @@ def online_score_handler(request, ctx, store):
     :param store:
     :return dict:
     """
-    mr = get_parsed_request(request)
     score_req = OnlineScoreRequest(mr.arguments)
 
     if not score_req.is_valid():
@@ -172,7 +170,7 @@ def method_handler(request, ctx, store):
         logging.info(u'Processing request: {}'.format(request))
         mr = get_parsed_request(request)
         if mr.method in METHODS:
-            response = METHODS[mr.method](request, ctx, store)
+            response = METHODS[mr.method](mr, ctx, store)
             code = OK
             logging.info(u'Request: {} successfully processed. Result is: {}'.format(request, response))
         else:
